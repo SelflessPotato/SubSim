@@ -2,12 +2,11 @@
 
 #include <vector>
 
+#include "net.h"
 #include "relay_event.h"
 
 namespace SubSim {
 namespace signals {
-
-    class Net;
 
     class Relay {
       public:
@@ -16,22 +15,37 @@ namespace signals {
             Dropped
         };
 
-        Relay(Net *coilInput, Net *commonInput, Net *frontContacts, Net *backContacts) :
-            m_coilInput(coilInput),
-            m_commonInput(commonInput),
-            m_frontContacts(frontContacts),
-            m_backContacts(backContacts) {}
-
         State getState() const { return m_state; }
 
-        std::vector<RelayEvent> updateAndCreateEvents();
+        std::vector<Net *> updateState(RelayConnectionPoint connectionPoint, Net::State newState);
+
+        Net *getNetByConnectionPoint(RelayConnectionPoint point) const;
+        void setNetByConnectionPoint(RelayConnectionPoint point, Net *net);
+        Net::State getDrivenValueByNet(Net *net) const;
+        RelayConnectionPoint getConnectionPointByNet(Net *net) const;
+
+        // Set driven inputs and create the associated RelayEvents for simulation
+        RelayEvent setExternallyDrivenInput(RelayConnectionPoint point, Net::State state);
+
+        static bool isInputConnection(RelayConnectionPoint point) {
+            return point == RelayConnectionPoint::CommonInput || point == RelayConnectionPoint::CoilInput;
+        }
+
+        static bool isOutputConnection(RelayConnectionPoint point) {
+            return point == RelayConnectionPoint::FrontContact || point == RelayConnectionPoint::BackContact;
+        }
+
+        Net::State getFrontState() const;
+        Net::State getBackState() const;
 
       protected:
         State m_state;
-        Net *m_coilInput;
-        Net *m_commonInput;
-        Net *m_frontContacts;
-        Net *m_backContacts;
+        Net::State m_externallyDrivenCommonInput = Net::State::Undriven;
+        Net::State m_externallyDrivenCoilInput = Net::State::Undriven;
+        Net *m_coilInput = nullptr;
+        Net *m_commonInput = nullptr;
+        Net *m_frontContacts = nullptr;
+        Net *m_backContacts = nullptr;
     };
 
 } // namespace signals
