@@ -134,3 +134,92 @@ TEST_CASE("Simulation Manager - Net with Multiple Drivers") {
     CHECK(relay2->getDrivenValueByNet(frontContacts) == Net::State::Undriven);
     CHECK(relay2->getDrivenValueByNet(backContacts) == Net::State::High);
 }
+
+TEST_CASE("Simulation Manager - Series Relays") {
+    // This test will verify that the controller properly handles events when they are created
+    // by other relays. The relay network is that which drives 2H in the diagram "Vital consistency
+    // enforced between H relays" in the NXSYS logic design document.
+
+    SimulationManager sim;
+
+    auto relay4as = sim.addRelay(); const int relay4asIdx = 0;
+    auto relay2as = sim.addRelay(); const int relay2asIdx = 1;
+    auto relay2r = sim.addRelay(); const int relay2rIdx = 2;
+    auto relay2h = sim.addRelay(); const int relay2hIdx = 3;
+
+    // Essentially the connections are:
+    // - 4AS common input is a constant high
+    // - 4AS coil input is an externally driven input
+    // - 2AS common input driven by front contacts of 4AS
+    // - 2AS coil input is an externally driven input
+    // - 2R common input is driven by back contacts of 2AS
+    // - 2R coil input is an externally driven input
+    // - 2H common input is a constant high (May want to verify this is true, but it should for testing regardless)
+    // - 2H coil input is driven by front contacts of 2R
+    sim.connect(relay4asIdx, RelayConnectionPoint::FrontContact, relay2asIdx, RelayConnectionPoint::CommonInput);
+    sim.connect(relay2asIdx, RelayConnectionPoint::BackContact, relay2rIdx, RelayConnectionPoint::CommonInput);
+    sim.connect(relay2rIdx, RelayConnectionPoint::FrontContact, relay2hIdx, RelayConnectionPoint::CoilInput);
+
+    std::queue<RelayEvent> initialEvents;
+    // Constant values
+    initialEvents.push(relay4as->setExternallyDrivenInput(RelayConnectionPoint::CommonInput, Net::State::High));
+    initialEvents.push(relay2h->setExternallyDrivenInput(RelayConnectionPoint::CoilInput, Net::State::High));
+
+    // Initial state of inputs
+    initialEvents.push(relay4as->setExternallyDrivenInput(RelayConnectionPoint::CoilInput, Net::State::Low));
+    initialEvents.push(relay2as->setExternallyDrivenInput(RelayConnectionPoint::CoilInput, Net::State::Low));
+    initialEvents.push(relay2r->setExternallyDrivenInput(RelayConnectionPoint::CoilInput, Net::State::Low));
+
+    // Initialize everything by simulating the initial state
+    sim.simulate(initialEvents);
+
+    // The only time that 2H should pick is when the externally driven inputs are:
+    // - 2R coil = High
+    // - 2AS coil = Low
+    // - 4AS coil = High
+
+    // We've just set up (2R, 2AS, 4AS) = (0, 0, 0) as the initial state, so we can check without any additional changes
+    CHECK(relay2h->getState() == Relay::State::Dropped);
+
+    // Now go through each set of inputs to verify everything resolves properly
+    std::queue<RelayEvent> test001Events;
+    test001Events.push(relay4as->setExternallyDrivenInput(RelayConnectionPoint::CoilInput, Net::State::High));
+    sim.simulate(test001Events);
+    CHECK(relay2h->getState() == Relay::State::Dropped);
+
+    std::queue<RelayEvent> test010Events;
+    test010Events.push(relay2as->setExternallyDrivenInput(RelayConnectionPoint::CoilInput, Net::State::High));
+    test010Events.push(relay4as->setExternallyDrivenInput(RelayConnectionPoint::CoilInput, Net::State::Low));
+    sim.simulate(test010Events);
+    CHECK(relay2h->getState() == Relay::State::Dropped);
+
+    std::queue<RelayEvent> test011Events;
+    test011Events.push(relay4as->setExternallyDrivenInput(RelayConnectionPoint::CoilInput, Net::State::High));
+    sim.simulate(test011Events);
+    CHECK(relay2h->getState() == Relay::State::Dropped);
+
+    std::queue<RelayEvent> test100Events;
+    test100Events.push(relay2r->setExternallyDrivenInput(RelayConnectionPoint::CoilInput, Net::State::High));
+    test100Events.push(relay2as->setExternallyDrivenInput(RelayConnectionPoint::CoilInput, Net::State::Low));
+    test100Events.push(relay4as->setExternallyDrivenInput(RelayConnectionPoint::CoilInput, Net::State::Low));
+    sim.simulate(test100Events);
+    CHECK(relay2h->getState() == Relay::State::Dropped);
+
+    // Here's our one case where 2H will pick
+    std::queue<RelayEvent> test101Events;
+    test101Events.push(relay4as->setExternallyDrivenInput(RelayConnectionPoint::CoilInput, Net::State::High));
+    sim.simulate(test101Events);
+    CHECK(relay2h->getState() == Relay::State::Picked);
+
+    // Now back to 2H being dropped for the rest of the input combinations
+    std::queue<RelayEvent> test110Events;
+    test110Events.push(relay2as->setExternallyDrivenInput(RelayConnectionPoint::CoilInput, Net::State::High));
+    test110Events.push(relay4as->setExternallyDrivenInput(RelayConnectionPoint::CoilInput, Net::State::Low));
+    sim.simulate(test110Events);
+    CHECK(relay2h->getState() == Relay::State::Dropped);
+
+    std::queue<RelayEvent> test111Events;
+    test111Events.push(relay4as->setExternallyDrivenInput(RelayConnectionPoint::CoilInput, Net::State::High));
+    sim.simulate(test111Events);
+    CHECK(relay2h->getState() == Relay::State::Dropped);
+}
